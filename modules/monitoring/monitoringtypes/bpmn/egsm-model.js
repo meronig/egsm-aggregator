@@ -27,7 +27,24 @@ class EgsmModel {
      * @param {*} compliance New Compliance
      */
     updateStage(stageId, status, state, compliance) {
-        this.stages.get(stageId).update(status, state, compliance)
+        return this.stages.get(stageId).update(status, state, compliance)
+    }
+
+    /**
+     * Update a condition of a stage in the model
+     * Will only be applied if the parent of the stage is a valid type (INCLUSIVE, EXCLUSIVE, ITERATION)
+     * @param {*} stageId ID to specify the Stage to update
+     * @param {*} value New condition value - boolean
+     */
+    recordStageCondition(stageId, value) {
+        var stage = this.stages.get(stageId)
+        var parentId = stage.parent
+        if (!this.stages.has(parentId))
+            return
+        var parent = this.stages.get(parentId)
+        if (parent.type !== 'INCLUSIVE' && parent.type !== 'EXCLUSIVE' && parent.type !== 'ITERATION')
+            return
+        stage.recordCondition(value)
     }
 
     /**
@@ -48,9 +65,29 @@ class EgsmModel {
      */
     _parseStageRecursive(stage, parent) {
         var children = stage['ca:SubStage'] || []
-        this.stages.set(stage['$'].id, new EgsmStage(stage['$'].id, stage['$'].name, parent, undefined,
+        var stageId = stage['$'].id
+        this.stages.set(stageId, new EgsmStage(stage['$'].id, stage['$'].name, parent, undefined,
             (parent != 'NONE' && this.stages.get(parent).type == 'SEQUENCE' && this.stages.get(parent).type != 'LIFECYCLE') ?
                 stage?.['ca:ProcessFlowGuard']?.[0]?.['$'].expression : undefined))
+        if (children[Object.keys(children)[0]]?.['$']?.id?.includes('iteration')) {
+            this.stages.get(stageId).type = 'LOOP'
+        }
+        // Reorder children so child[0] is forward and child[1] is backward branch
+        if (parent !== 'NONE' && this.stages.get(parent).type === 'LOOP') {
+            var childKeys = Object.keys(children);
+            if (childKeys.length === 2) {
+                var swapNeeded = false;
+                var secondChildId = children[childKeys[1]]['$'].id;
+                var firstChildGuard = children[childKeys[0]]?.['ca:ProcessFlowGuard']?.[0]?.['$']?.expression;
+                if (firstChildGuard && firstChildGuard.includes(secondChildId))
+                    swapNeeded = true;
+                if (swapNeeded) {
+                    var temp = children[childKeys[0]];
+                    children[childKeys[0]] = children[childKeys[1]];
+                    children[childKeys[1]] = temp;
+                }
+            }
+        }
         for (var key in children) {
             this.stages.get(stage['$'].id).addChild(children[key]['$'].id)
             this._parseStageRecursive(children[key], stage['$'].id)
@@ -61,7 +98,7 @@ class EgsmModel {
      * Instantiate Stages and build Process Tree based on the provided XML eGSM model definition in the constructor
      */
     _buildModel() {
-        if(this.model_xml == undefined){
+        if (this.model_xml == undefined) {
             return
         }
         var context = this
@@ -85,11 +122,11 @@ class EgsmModel {
         var result = []
         for (var [key, entry] of this.stages) {
             if (entry.type == 'ACTIVITY') {
-            result.push({
-                name: entry.id,
-                status: entry.status,
-                state: entry.state
-            })
+                result.push({
+                    name: entry.id,
+                    status: entry.status,
+                    state: entry.state
+                })
             }
         }
         return result

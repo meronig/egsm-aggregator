@@ -24,10 +24,12 @@ class ProcessDeviationDetection extends Job {
     }
 
     /**
-     * Called when the EngineObserver reveives an event from the Process
+     * Called when the EngineObserver receives an event from the Process
      * @param {Object} messageObj The Event Object 
      */
     onProcessEvent(messageObj) {
+        if (messageObj.hasOwnProperty('condition'))
+            return
         var errors = Validator.validateProcessStage(messageObj.stage)
         if (errors.length > 0) {
             console.debug(`Faulty stage of process [${messageObj.processtype}/${messageObj.instanceid}]__${messageObj.perspective} detected: ${JSON.stringify(errors)}`)

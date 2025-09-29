@@ -115,6 +115,28 @@ class MonitoringManager {
     }
 
     /**
+     * Get the number of currently deployed Jobs
+     * @returns Number of currently Deployed Jobs
+     */
+    getDeviationAggregationJobs() {
+        let jobs = []
+        for (let [_, value] of this.jobs) {
+            if (value.job_type === 'process-deviation-aggregation') {
+                jobs.push({
+                    id: value.id,
+                    job_type: value.job_type,
+                    processType: value.processType,
+                    brokers: [{
+                        host: CONNCONFIG.getConfig().socket_host,
+                        port: CONNCONFIG.getConfig().socket_port
+                    }]
+                })
+            }
+        }
+        return jobs
+    }
+
+    /**
      * Get Singleton instance
      * @returns Returns the singleton instance of MonitoringManager
      */

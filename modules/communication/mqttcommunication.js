@@ -8,6 +8,7 @@ var MQTT = require("../egsm-common/communication/mqttconnector")
 var LOG = require('../egsm-common/auxiliary/logManager')
 var AUX = require('../egsm-common/auxiliary/auxiliary')
 var CONNCONFIG = require('../egsm-common/config/connectionconfig');
+const DEVLOG = require('../monitoring/deviationlogger');
 const { Broker } = require("../egsm-common/auxiliary/primitives");
 
 module.id = "MQTTCOMM"
@@ -21,6 +22,7 @@ const AGGREGATORS_TO_SUPERVISORS = 'aggregators_to_supervisor'
 const SUPERVISOR_TO_AGGREGATORS = 'supervisor_to_aggregators'
 const WORKERS_TO_AGGREGATORS = 'workers_to_aggregators'
 const AGGREGATORS_TO_WORKERS = 'aggregators_to_workers'
+const AGGREGATORS_TO_AGGREGATORS = 'aggregators_to_aggregators'
 
 var MQTT_HOST = undefined
 var MQTT_PORT = undefined;
@@ -34,7 +36,7 @@ var MONITORING_MANAGER = undefined // Reference to the used Monitoring Manager i
 
 function onMessageReceived(hostname, port, topic, message) {
     LOG.logSystem('DEBUG', `New message received from topic: ${topic}`, module.id)
-    if ((hostname != MQTT_HOST || port != MQTT_PORT) || (topic != SUPERVISOR_TO_AGGREGATORS && topic != CONNCONFIG.getConfig().self_id && topic != WORKERS_TO_AGGREGATORS)) {
+    if ((hostname != MQTT_HOST || port != MQTT_PORT) || (topic != SUPERVISOR_TO_AGGREGATORS && topic != CONNCONFIG.getConfig().self_id && topic != WORKERS_TO_AGGREGATORS && topic != AGGREGATORS_TO_AGGREGATORS)) {
         LOG.logSystem('DEBUG', `Reveived message is not intended to handle here`, module.id)
         return
     }
@@ -79,7 +81,7 @@ function onMessageReceived(hostname, port, topic, message) {
                     }
                     MQTT.publishTopic(MQTT_HOST, MQTT_PORT, AGGREGATORS_TO_SUPERVISORS, JSON.stringify(response))
                 }
-                break
+                break;
             }
             case 'SEARCH': {
                 LOG.logWorker('DEBUG', `SEARCH requested for ${msgJson['payload']['job_id']}`, module.id)
@@ -92,11 +94,54 @@ function onMessageReceived(hostname, port, topic, message) {
                     }
                     MQTT.publishTopic(MQTT_HOST, MQTT_PORT, AGGREGATORS_TO_SUPERVISORS, JSON.stringify(response))
                 }
-                break
+                break;
+            }
+            case 'GET_DEVIATION_AGGREGATORS': {
+                LOG.logWorker('DEBUG', 'GET_DEVIATION_AGGREGATORS requested', module.id)
+                var response = {
+                    request_id: msgJson['request_id'],
+                    message_type: 'GET_DEVIATION_AGGREGATORS_RESP',
+                    sender_id: CONNCONFIG.getConfig().self_id,
+                    payload: MONITORING_MANAGER.getDeviationAggregationJobs()
+                }
+                MQTT.publishTopic(MQTT_HOST, MQTT_PORT, AGGREGATORS_TO_SUPERVISORS, JSON.stringify(response))
+                break;
+            }
+            case 'GET_COMPLETE_JOB_DATA': {
+                const job = MONITORING_MANAGER.getJob(msgJson['job_id']);
+                let responseData = 'not_found';
+
+                if (job && job.job_type === 'process-deviation-aggregation') {
+                    responseData = job.getCompleteAggregationData();
+                }
+
+                const response = {
+                    request_id: msgJson['request_id'],
+                    message_type: 'GET_COMPLETE_JOB_DATA_RESPONSE',
+                    sender_id: CONNCONFIG.getConfig().self_id,
+                    payload: responseData
+                };
+                MQTT.publishTopic(MQTT_HOST, MQTT_PORT, AGGREGATORS_TO_SUPERVISORS, JSON.stringify(response))
+                break;
+            }
+            case 'NEW_PROCESS_INSTANCE': {
+                LOG.logSystem('DEBUG', `NEW_PROCESS_INSTANCE message received`, module.id)
+                if (MONITORING_MANAGER) {
+                    const processType = msgJson['payload']['process_type'];
+                    const instanceId = msgJson['payload']['process_id'];
+
+                    for (const [jobId, job] of MONITORING_MANAGER.jobs) {
+                        if (job.job_type === 'process-deviation-aggregation' &&
+                            job.processType === processType) {
+                            job.handleNewInstance(instanceId);
+                            LOG.logSystem('DEBUG', `NEW_PROCESS_INSTANCE routed to job ${jobId}`, module.id);
+                        }
+                    }
+                }
+                break;
             }
         }
-    }
-    else if (topic == WORKERS_TO_AGGREGATORS) {
+    } else if (topic == WORKERS_TO_AGGREGATORS) {
         switch (msgJson['message_type']) {
             case 'PROCESS_GROUP_MEMBER_DISCOVERY_RESP': {
                 LOG.logSystem('DEBUG', `PROCESS_GROUP_MEMBER_DISCOVERY_RESP message received, request_id: [${msgJson['request_id']}]`, module.id)
@@ -106,8 +151,27 @@ function onMessageReceived(hostname, port, topic, message) {
                 break;
             }
         }
-    }
-    else if (topic == CONNCONFIG.getConfig().self_id) {
+    } else if (topic == AGGREGATORS_TO_AGGREGATORS) {
+        switch (msgJson.message_type) {
+            case 'PROCESS_DEVIATIONS': {
+                LOG.logSystem('DEBUG', `PROCESS_DEVIATIONS message received`, module.id)
+                DEVLOG.handleDeviations(msgJson['payload']);
+                if (MONITORING_MANAGER) {
+                    const processType = msgJson['payload']['process_type'];
+                    const perspective = msgJson['payload']['process_perspective'];
+                    for (const [jobId, job] of MONITORING_MANAGER.jobs) {
+                        if (job.job_type === 'process-deviation-aggregation' &&
+                            job.processType === processType &&
+                            job.perspectives.has(perspective)) {
+                            job.handleDeviations(msgJson['payload']);
+                            LOG.logSystem('DEBUG', `PROCESS_DEVIATIONS routed to job ${jobId}`, module.id);
+                        }
+                    }                   
+                }
+                break;
+            }
+        }
+    } else if (topic == CONNCONFIG.getConfig().self_id) {
         LOG.logSystem('DEBUG', `Dedicated message received`, module.id)
         switch (msgJson['message_type']) {
             case 'NEW_JOB': {
@@ -183,17 +247,18 @@ async function initPrimaryBrokerConnection(broker) {
     //Find an unused, unique ID for the Engine
     while (true) {
         var topicSelf = UUID.v4();
-        MQTT.subscribeTopic(MQTT_HOST, MQTT_PORT, topicSelf)
+        await MQTT.subscribeTopic(MQTT_HOST, MQTT_PORT, topicSelf)
         var result = await checkIdCandidate(topicSelf)
         if (result == 'ok') {
             break;
         }
         else {
-            MQTT.unsubscribeTopic(MQTT_HOST, MQTT_PORT, topicSelf)
+            await MQTT.unsubscribeTopic(MQTT_HOST, MQTT_PORT, topicSelf)
         }
     }
-    MQTT.subscribeTopic(MQTT_HOST, MQTT_PORT, WORKERS_TO_AGGREGATORS)
-    MQTT.subscribeTopic(MQTT_HOST, MQTT_PORT, SUPERVISOR_TO_AGGREGATORS)
+    await MQTT.subscribeTopic(MQTT_HOST, MQTT_PORT, WORKERS_TO_AGGREGATORS)
+    await MQTT.subscribeTopic(MQTT_HOST, MQTT_PORT, SUPERVISOR_TO_AGGREGATORS)
+    await MQTT.subscribeTopic(MQTT_HOST, MQTT_PORT, AGGREGATORS_TO_AGGREGATORS, false)
     return topicSelf
 }
 
@@ -211,7 +276,7 @@ function setMonitoringManager(manager) {
  * @param {Object} rules Rules the Engines should satisfy. 
  * The function broadcasts a message which is received by each Workers. If any of them has at least one engine satisfying the rules it will reply
  * Finally the function receives the reply, and builds a set containing all Process Instances which has at least one engine among the received replies 
- * @returns Promise will contain a set of Engine Id-s (<Process Type>/<Instnace ID>)
+ * @returns Promise will contain a set of Engine Id-s (<Process Type>/<Instance ID>)
  */
 async function discoverProcessGroupMembers(rules) {
     var request_id = UUID.v4();

@@ -1,10 +1,12 @@
 var LOG = require('../../../egsm-common/auxiliary/logManager')
 var CONNCOMM = require('../../../egsm-common/config/connectionconfig')
+const MQTT = require('../../../egsm-common/communication/mqttconnector')
+var MQTTCONN = require('../../../communication/mqttcommunication')
 const { ProcessNotification } = require('../../../egsm-common/auxiliary/primitives')
 const { Validator } = require('../../../egsm-common/auxiliary/validator')
 const { Job } = require('../job')
 const { ProcessPerspective } = require('./process-perspective')
-const { SkipDeviation, IncompleteDeviation } = require("./process-perspective");
+const { SkipDeviation, IncompleteDeviation } = require("./process-perspective")
 
 module.id = "BPMN"
 
@@ -27,23 +29,31 @@ class BpmnJob extends Job {
    * @param {Object} messageObj received process event object 
    */
   onProcessEvent(messageObj) {
-    console.log(messageObj)
     var process = messageObj.process_type + '/' + messageObj.process_id + '__' + messageObj.process_perspective
-    if (this.monitoredprocesses.has(process)) {
-      if (this.perspectives.has(messageObj.process_perspective)) {
-        var perspective = this.perspectives.get(messageObj.process_perspective)
-        var egsm = perspective.egsm_model
-        if (egsm.stages.has(messageObj.stage_name)) {
-          if(messageObj.state == 'opened'){
-            messageObj.state = 'open'
-          }
-          egsm.updateStage(messageObj.stage_name, messageObj.status.toUpperCase(), messageObj.state.toUpperCase(), messageObj.compliance.toUpperCase())
-          var deviations = perspective.analyze()
-          this.triggerCompleteUpdateEvent()
-          console.log(deviations)
-        }
+    if (!this.monitoredprocesses.has(process))
+      return
+    if (!this.perspectives.has(messageObj.process_perspective))
+      return
+    var perspective = this.perspectives.get(messageObj.process_perspective)
+    var egsm = perspective.egsm_model
+    var isConditionEvent = messageObj.hasOwnProperty('condition')
+    if (isConditionEvent) {
+      egsm.recordStageCondition(messageObj.stage_name, messageObj.condition)
+    } else {
+      if (!egsm.stages.has(messageObj.stage_name))
+        return
+      if (messageObj.state == 'opened') {
+        messageObj.state = 'open'
       }
+      var update = egsm.updateStage(messageObj.stage_name, messageObj.status.toUpperCase(), messageObj.state.toUpperCase(), messageObj.compliance.toUpperCase())
+      if (!update)
+        return
+      perspective.egsm_model.stages.forEach(stage => stage.cleanPropagations())
+      var deviations = perspective.analyze()
+      this.emitDeviations(deviations, messageObj)
+      this.triggerCompleteUpdateEvent()
     }
+
     /*var errors = Validator.validateProcessStage(messageObj.stage)
     if (errors.length > 0) {
         console.debug(`Faulty stage of process [${messageObj.processtype}/${messageObj.instanceid}]__${messageObj.perspective} detected: ${JSON.stringify(errors)}`)
@@ -121,6 +131,31 @@ class BpmnJob extends Job {
    */
   triggerCompleteUpdateEvent() {
     this.eventEmitter.emit('job-update', this.getCompleteUpdate())
+  }
+
+  /**
+   * Emits the deviations for per process aggregation
+   * @param {Array} deviations List of deviations
+   * @param {Object} messageObj Process event object
+   */
+  emitDeviations(deviations, messageObj) {
+    if (deviations.length == 0)
+      return //TODO: Consider if we should emit empty deviations to get the process for the first time
+    const deviationMessage = {
+      request_id: require('uuid').v4(),
+      message_type: 'PROCESS_DEVIATIONS',
+      sender_id: require('../../../egsm-common/config/connectionconfig').getConfig().self_id,
+      payload: {
+        process_type: messageObj.process_type,
+        process_id: messageObj.process_id,
+        process_perspective: messageObj.process_perspective,
+        deviations: deviations,
+        timestamp: Date.now()
+      }
+    }
+    const broker = this.brokers[0]
+    MQTT.publishTopic(broker.host, broker.port, 'aggregators_to_aggregators',
+      JSON.stringify(deviationMessage))
   }
 }
 

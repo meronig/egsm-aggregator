@@ -1,6 +1,8 @@
 var UUID = require("uuid");
 var xml2js = require('xml2js');
-const { BpmnTask, BpmnConnection, BpmnGateway, BpmnEvent, BpmnBlockOverlayReport, Point } = require("./bpmn-constructs");
+const { BpmnBlock, BpmnTask, BpmnConnection, BpmnGateway, BpmnEvent, BpmnBlockOverlayReport, Point } = require("./bpmn-constructs");
+
+const fs = require('fs');
 
 /**
  * Class representing a BPMN model
@@ -8,7 +10,7 @@ const { BpmnTask, BpmnConnection, BpmnGateway, BpmnEvent, BpmnBlockOverlayReport
 class BpmnModel {
     /**
      * 
-     * @param {String} perspectiveName Name of Process Perspective the BpmnModel instnace embodies
+     * @param {String} perspectiveName Name of Process Perspective the BpmnModel instance embodies
      * @param {String} modelXml Valid XML String describing the BPMN model (both process and diagram (visualization))
      */
     constructor(perspectiveName, modelXml) {
@@ -17,7 +19,7 @@ class BpmnModel {
         this.perspective_name = perspectiveName
         this.lifecycle_stage = 'CREATED' //CREATED-RUNNING-ACTIVE-COMPLETED
 
-        this.construcs = new Map() //Containing all Blocks and Edges of the original Process Diagram
+        this.constructs = new Map() //Containing all Blocks and Edges of the original Process Diagram
         this.overlay_constructs = new Map() //Contains Bpmn Blocks and Edges which are created to represent deviations, but not part of the original model
 
         this.parseModelXml()
@@ -56,7 +58,7 @@ class BpmnModel {
         var shapes = this.parsed_model_xml['bpmn2:definitions']['bpmndi:BPMNDiagram'][0]['bpmndi:BPMNPlane'][0]['bpmndi:BPMNShape']
         var edges = this.parsed_model_xml['bpmn2:definitions']['bpmndi:BPMNDiagram'][0]['bpmndi:BPMNPlane'][0]['bpmndi:BPMNEdge']
         //Reset model data structures
-        this.construcs.clear()
+        this.constructs.clear()
         this.overlay_constructs.clear()
         shapes.forEach(element => {
             var shape = {
@@ -80,14 +82,14 @@ class BpmnModel {
         for (var key in tasks) {
             var newTask = new BpmnTask(tasks[key]['$'].id, tasks[key]['$'].name, tasks[key]['bpmn2:incoming'], tasks[key]['bpmn2:outgoing'],
                 diagram_elements.get(tasks[key]['$'].id))
-            this.construcs.set(tasks[key]['$'].id, newTask)
+            this.constructs.set(tasks[key]['$'].id, newTask)
         }
 
         var connections = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:sequenceFlow']
         for (var key in connections) {
             var newConnection = new BpmnConnection(connections[key]['$'].id, connections[key]['$'].name, connections[key]['$'].sourceRef,
                 connections[key]['$'].targetRef, diagram_elements.get(connections[key]['$'].id))
-            this.construcs.set(connections[key]['$'].id, newConnection)
+            this.constructs.set(connections[key]['$'].id, newConnection)
         }
 
         var parallelGateways = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:parallelGateway']
@@ -95,7 +97,7 @@ class BpmnModel {
             var newGateway = new BpmnGateway(parallelGateways[key]['$'].id, parallelGateways[key]['$'].name, 'PARALLEL',
                 parallelGateways[key]['$'].gatewayDirection, parallelGateways[key]['bpmn2:incoming'], parallelGateways[key]['bpmn2:outgoing'],
                 diagram_elements.get(parallelGateways[key]['$'].id))
-            this.construcs.set(parallelGateways[key]['$'].id, newGateway)
+            this.constructs.set(parallelGateways[key]['$'].id, newGateway)
         }
 
         var exclusiveGateways = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:exclusiveGateway']
@@ -103,7 +105,7 @@ class BpmnModel {
             var newGateway = new BpmnGateway(exclusiveGateways[key]['$'].id, exclusiveGateways[key]['$'].name, 'EXCLUSIVE',
                 exclusiveGateways[key]['$'].gatewayDirection, exclusiveGateways[key]['bpmn2:incoming'], exclusiveGateways[key]['bpmn2:outgoing'],
                 diagram_elements.get(exclusiveGateways[key]['$'].id))
-            this.construcs.set(exclusiveGateways[key]['$'].id, newGateway)
+            this.constructs.set(exclusiveGateways[key]['$'].id, newGateway)
         }
 
         var inclusiveGateways = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:inclusiveGateway']
@@ -111,46 +113,46 @@ class BpmnModel {
             var newGateway = new BpmnGateway(inclusiveGateways[key]['$'].id, inclusiveGateways[key]['$'].name, 'INCLUSIVE',
                 inclusiveGateways[key]['$'].gatewayDirection, inclusiveGateways[key]['bpmn2:incoming'], inclusiveGateways[key]['bpmn2:outgoing'],
                 diagram_elements.get(inclusiveGateways[key]['$'].id))
-            this.construcs.set(inclusiveGateways[key]['$'].id, newGateway)
+            this.constructs.set(inclusiveGateways[key]['$'].id, newGateway)
         }
 
         var startEvents = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:startEvent']
         for (var key in startEvents) {
             var newEvent = new BpmnEvent(startEvents[key]['$'].id, startEvents[key]['$'].name, 'START', [], startEvents[key]['bpmn2:outgoing'], undefined,
                 diagram_elements.get(startEvents[key]['$'].id))
-            this.construcs.set(startEvents[key]['$'].id, newEvent)
+            this.constructs.set(startEvents[key]['$'].id, newEvent)
         }
 
         var endEvents = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:endEvent']
         for (var key in endEvents) {
             var newEvent = new BpmnEvent(endEvents[key]['$'].id, endEvents[key]['$'].name, 'END', endEvents[key]['bpmn2:incoming'], [], undefined,
                 diagram_elements.get(endEvents[key]['$'].id))
-            this.construcs.set(endEvents[key]['$'].id, newEvent)
+            this.constructs.set(endEvents[key]['$'].id, newEvent)
         }
 
         var boundaryEvents = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:boundaryEvent']
         for (var key in boundaryEvents) {
             var newEvent = new BpmnEvent(boundaryEvents[key]['$'].id, boundaryEvents[key]['$'].name, 'BOUNDARY', [],
                 boundaryEvents[key]['bpmn2:outgoing'], boundaryEvents[key]['$'].attachedToRef, diagram_elements.get(boundaryEvents[key]['$'].id))
-            this.construcs.set(boundaryEvents[key]['$'].id, newEvent)
+            this.constructs.set(boundaryEvents[key]['$'].id, newEvent)
         }
 
         var intermediateThrowEvents = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:intermediateThrowEvent']
         for (var key in intermediateThrowEvents) {
             var newEvent = new BpmnEvent(intermediateThrowEvents[key]['$'].id, intermediateThrowEvents[key]['$'].name, 'INTERMEDIATE_THROW', intermediateThrowEvents[key]['bpmn2:incoming'],
                 intermediateThrowEvents[key]['bpmn2:outgoing'], undefined, diagram_elements.get(intermediateThrowEvents[key]['$'].id))
-            this.construcs.set(intermediateThrowEvents[key]['$'].id, newEvent)
+            this.constructs.set(intermediateThrowEvents[key]['$'].id, newEvent)
         }
 
         var intermediateCatchEvents = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:intermediateCatchEvent']
         for (var key in intermediateCatchEvents) {
             var newEvent = new BpmnEvent(intermediateCatchEvents[key]['$'].id, intermediateCatchEvents[key]['$'].name, 'INTERMEDIATE_CATCH', intermediateCatchEvents[key]['bpmn2:incoming'],
                 intermediateCatchEvents[key]['bpmn2:outgoing'], undefined, diagram_elements.get(intermediateCatchEvents[key]['$'].id))
-            this.construcs.set(intermediateCatchEvents[key]['$'].id, newEvent)
+            this.constructs.set(intermediateCatchEvents[key]['$'].id, newEvent)
         }
 
         //When the model is complete, iterating through the blocks and for each diverging BpmnGateway one find the converging
-        this.construcs.forEach(element => {
+        this.constructs.forEach(element => {
             if (element.constructor.name == 'BpmnGateway' && element.subtype == 'Diverging') {
                 var convergingGateway = this.findConvergingGateway(element)
                 if (convergingGateway != element) {
@@ -178,23 +180,43 @@ class BpmnModel {
      * @returns Returns a BpmnGateway object of the converging pair of 'divergingGateway'
      */
     findConvergingGateway(divergingGateway) {
-        var counter = 1
-        var currentNode = divergingGateway
-        while (counter != 0) {
-            var outputs = currentNode.outputs
-            if (outputs.length == 0) {
-                currentNode = divergingGateway.id
-                break
+        //Use BFS to find the matching converging gateway
+        const queue = [...divergingGateway.outputs.map(output => this.constructs.get(output))]
+        const visited = new Set([divergingGateway.id])
+        let nestingLevel = 1
+        while (queue.length > 0 && nestingLevel > 0) {
+            const current = queue.shift()
+            if (!current)
+                continue
+            const targetId = current.target
+            if (!targetId || visited.has(targetId))
+                continue
+            visited.add(targetId);
+            const targetNode = this.constructs.get(targetId)
+            if (!targetNode)
+                continue
+            //Check if this is a gateway
+            if (targetNode.constructor.name === 'BpmnGateway') {
+                if (targetNode.subtype === 'Diverging') {
+                    nestingLevel++
+                } else if (targetNode.subtype === 'Converging') {
+                    nestingLevel--
+                    if (nestingLevel === 0) {
+                        return targetNode
+                    }
+                }
             }
-            var currentNode = this.construcs.get(this.construcs.get(outputs[0]).target)
-            if (currentNode.constructor.name == 'BpmnGateway' && currentNode.subtype == 'Diverging') {
-                counter++
-            }
-            else if (currentNode.constructor.name == 'BpmnGateway' && currentNode.subtype == 'Converging') {
-                counter--
+            //Add all outputs to the queue for exploration
+            if (targetNode.outputs && targetNode.outputs.length > 0) {
+                for (const outputId of targetNode.outputs) {
+                    const outputFlow = this.constructs.get(outputId)
+                    if (outputFlow && !visited.has(outputFlow.id)) {
+                        queue.push(outputFlow)
+                    }
+                }
             }
         }
-        return currentNode
+        return null
     }
 
     /**
@@ -203,8 +225,8 @@ class BpmnModel {
      */
     applyEgsmStageArray(stageInfo) {
         stageInfo.forEach(element => {
-            if (this.construcs.has(element.name)) {
-                this.construcs.get(element.name).update(element.status, element.state)
+            if (this.constructs.has(element.name)) {
+                this.constructs.get(element.name).update(element.status, element.state)
             }
         });
     }
@@ -218,80 +240,96 @@ class BpmnModel {
             //SkipDeviation consists of an OutOfOrder activity and a Skipped Sequence
             //It is represented as an arrow from the last correctly executed activity to the
             //OutOfOrder one
+            //TODO: consider the case where last few stages of a sequence are skipped
             case 'SKIPPED':
-                var firstSkippedBlock = deviation.block_a[0]
+                var firstSkippedBlock = deviation.block_a[0].endsWith('_iteration')
+                    ? deviation.block_a[0].slice(0, -'_iteration'.length)
+                    : deviation.block_a[0];
                 var lastSkippedBlock = deviation.block_a.at(-1)
-                if (this.construcs.has(deviation.block_a[0])) {
-                    this.construcs.get(deviation.block_a[0]).addDeviation('SKIPPED')
+                if (this.constructs.has(firstSkippedBlock)) {
+                    var block = this.constructs.get(firstSkippedBlock)
+                    if (block.constructor.name !== 'BpmnConnection') {
+                        block.addDeviation('SKIPPED', { iterationIndex: deviation.iterationIndex, parentIndex: deviation.parentIndex })
+                    }
                 }
-                if (this.construcs.has(deviation.block_b)) {
-                    //this.construcs.get(deviation.block_b).addDeviation('INCORRECT_EXECUTION')
-                }
+                if (!deviation.block_b || deviation.block_b === 'NONE')
+                    break;
                 //It means that the first and last blocks which has been skipped exist in the BPMN diagram as well
-                if (this.construcs.has(firstSkippedBlock) && this.construcs.has(lastSkippedBlock)) {
-                    var inputEdge = this.construcs.get(firstSkippedBlock).inputs?.[0] || 'NONE'
-                    var outputEdge = this.construcs.get(lastSkippedBlock).outputs?.[0] || 'NONE'
+                if (this.constructs.has(firstSkippedBlock) && this.constructs.has(lastSkippedBlock)) {
+                    var inputEdge = this.constructs.get(firstSkippedBlock).inputs?.[0] || 'NONE'
+                    var outputEdge = this.constructs.get(lastSkippedBlock).outputs?.[0] || 'NONE'
                     //If a whole block has been skipped we need to use the pair_gateway
-                    if (this.construcs.get(lastSkippedBlock).constructor.name == 'BpmnGateway') {
-                        if (this.construcs.get(lastSkippedBlock).pair_gateway != 'NA') {
-                            outputEdge = this.construcs.get(this.construcs.get(lastSkippedBlock).pair_gateway)?.outputs[0] || 'NONE'
+                    if (this.constructs.get(lastSkippedBlock).constructor.name == 'BpmnGateway') {
+                        if (this.constructs.get(lastSkippedBlock).pair_gateway != 'NA') {
+                            outputEdge = this.constructs.get(this.constructs.get(lastSkippedBlock).pair_gateway)?.outputs[0] || 'NONE'
                         }
                     }
                     var source = 'NONE'
                     var destination = 'NONE'
                     if (inputEdge != 'NONE') {
-                        source = this.construcs.get(inputEdge).source || 'NONE'
+                        source = this.constructs.get(inputEdge).source || 'NONE'
                     }
                     if (outputEdge != 'NONE') {
-                        destination = this.construcs.get(outputEdge).target || 'NONE'
+                        destination = this.constructs.get(outputEdge).target || 'NONE'
                     }
-                    //IF any of source of destination is 'NONE', then it requires further consideration, since BPMN specification
+                    //IF any of source or destination is 'NONE', then it requires further consideration, since BPMN specification
                     //requires to provide the source and destination of the edge
                     if (source != 'NONE' && destination != 'NONE') {
-                        var waypoints = [this.construcs.get(inputEdge).waypoints[0], new Point(this.construcs.get(inputEdge).waypoints[0].x, 450),
-                        new Point(this.construcs.get(outputEdge).waypoints.at(-1).x, 450),
-                        this.construcs.get(outputEdge).waypoints.at(-1)]
-                        this._addSkippingEdgeToModel(UUID.v4(), waypoints, source, destination)
+                        var waypoints = [this.constructs.get(inputEdge).waypoints[0], new Point(this.constructs.get(inputEdge).waypoints[0].x, 450),
+                        new Point(this.constructs.get(outputEdge).waypoints.at(-1).x, 450),
+                        this.constructs.get(outputEdge).waypoints.at(-1)]
+                        this._addSkippingEdgeToModel(this._getNextSequenceId(), waypoints, source, destination)
                     }
                     //StartEvent has been skipped, we need to add a virtual start event to draw the skipping edge
                     if (source == 'NONE' && destination != 'NONE') {
                         var idShape = UUID.v4()
-                        var idEdge = UUID.v4()
                         var eventPosition = new Point(80, 450)
                         var eventWidth = 36
                         var eventHeight = 36
                         var waypoints = [new Point(eventPosition.x + eventWidth / 2, eventPosition.y + eventHeight / 2), new Point(eventPosition.x + eventWidth / 2, 450 + eventHeight / 2),
-                        new Point(this.construcs.get(outputEdge).waypoints.at(-1).x, 450 + eventHeight / 2),
-                        this.construcs.get(outputEdge).waypoints.at(-1)]
-                        var edgeId = this._addSkippingEdgeToModel(idEdge, waypoints, idShape, destination)
+                        new Point(this.constructs.get(outputEdge).waypoints.at(-1).x, 450 + eventHeight / 2),
+                        this.constructs.get(outputEdge).waypoints.at(-1)]
+                        var edgeId = this._addSkippingEdgeToModel(this._getNextSequenceId(), waypoints, idShape, destination)
                         this._addIllegalEntryToModel(idShape, eventPosition, eventWidth, eventHeight, edgeId)
                     }
                 }
 
                 break;
-            //IncompleteDeviation regards always one eGSM stage only. If we are able to find the
-            //matching BPMN task or block then we can add a Flag, otherwise neglect it
-            case 'INCOMPLETE':
-                if (this.construcs.has(deviation.block_a)) {
-                    this.construcs.get(deviation.block_a).addDeviation('INCOMPLETE')
+            case 'OVERLAP':
+                if (this.constructs.has(deviation.block_b)) {
+                    this.constructs.get(deviation.block_b).addDeviation('OVERLAP', { over: deviation.block_a, iterationIndex: deviation.iterationIndex, parentIndex: deviation.parentIndex })
                 }
                 break;
-
+            //IncompleteDeviation regards always one eGSM stage only. If we are able to find the
+            //matching BPMN task or block then we can add a Flag, otherwise neglect it
+            //TODO: consider how this works with parallel, inclusive, exclusive, iteration
+            case 'INCOMPLETE':
+                var constructId = deviation.block_a.endsWith('_iteration')
+                    ? deviation.block_a.slice(0, -'_iteration'.length)
+                    : deviation.block_a;
+                const construct = this.constructs.get(constructId)
+                if (construct instanceof BpmnBlock) {
+                    construct.addDeviation('INCOMPLETE', { iterationIndex: deviation.iterationIndex, parentIndex: deviation.parentIndex })
+                }
+                break;
+            //TODO: consider branches
             case 'MULTI_EXECUTION':
-                if (this.construcs.has(deviation.block_a)) {
-                    this.construcs.get(deviation.block_a).addDeviation('MULTI_EXECUTION')
+                if (this.constructs.has(deviation.block_a)) {
+                    this.constructs.get(deviation.block_a).addDeviation('MULTI_EXECUTION', { count: deviation.executionCount, iterationIndex: deviation.iterationIndex, parentIndex: deviation.parentIndex })
                 }
                 break;
             case 'INCORRECT_EXECUTION':
-                deviation.block_a.forEach(element => {
-                    if (this.construcs.has(element)) {
-                        this.construcs.get(element).addDeviation('INCORRECT_EXECUTION')
-                    }
-                });
+                //TODO: could also add edges based on the sequence, but needs more consideration
+                var constructId = deviation.block_a.endsWith('_iteration')
+                    ? deviation.block_a.slice(0, -'_iteration'.length)
+                    : deviation.block_a;
+                if (this.constructs.has(constructId)) {
+                    this.constructs.get(constructId).addDeviation('INCORRECT_EXECUTION', { iterationIndex: deviation.iterationIndex, parentIndex: deviation.parentIndex })
+                }
                 break;
             case 'INCORRECT_BRANCH':
-                if (this.construcs.has(deviation.block_a)) {
-                    this.construcs.get(deviation.block_a).addDeviation('INCORRECT_BRANCH')
+                if (this.constructs.has(deviation.block_a)) {
+                    this.constructs.get(deviation.block_a).addDeviation('INCORRECT_BRANCH', { iterationIndex: deviation.iterationIndex, parentIndex: deviation.parentIndex })
                 }
                 break;
         }
@@ -338,7 +376,13 @@ class BpmnModel {
                 sourceElement: 'BPMNShape_' + sourceNode,
                 targetElement: 'BPMNShape_' + targetNode
             },
-            'di:waypoint': []
+            'di:waypoint': [],
+            'bpmndi:BPMNLabel': {
+                $: {
+                    id: 'BPMNLabel_' + id,
+                    labelStyle: 'BPMNLabelStyle_1'
+                }
+            }
         }
         waypoints.forEach(point => {
             newBpmnEdge['di:waypoint'].push({
@@ -349,11 +393,43 @@ class BpmnModel {
                 }
             })
         });
-        this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:sequenceFlow'].push(newBpmnSequence)
+        const process = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]
+        process['bpmn2:sequenceFlow'].push(newBpmnSequence)
         this.parsed_model_xml['bpmn2:definitions']['bpmndi:BPMNDiagram'][0]['bpmndi:BPMNPlane'][0]['bpmndi:BPMNEdge'].push(newBpmnEdge)
+        this._findElementById(process, sourceNode)['bpmn2:outgoing'].push(id)
+        this._findElementById(process, targetNode)['bpmn2:incoming'].push(id)
         this.overlay_constructs.set(id, new BpmnConnection(id, '', sourceNode, targetNode, waypoints))
         this.overlay_constructs.get(id).status = 'HIGHLIGHTED'
         return id
+    }
+
+    _findElementById(process, id) {
+        for (const [_, elements] of Object.entries(process)) {
+            if (!Array.isArray(elements)) continue;
+            const found = elements.find(el => el.$?.id === id);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    _getNextSequenceId() {
+        const sequenceFlows = this.parsed_model_xml['bpmn2:definitions']['bpmn2:process'][0]['bpmn2:sequenceFlow'];
+        if (!sequenceFlows || sequenceFlows.length === 0) {
+            return 'SequenceFlow_1';
+        }
+        let maxNumber = 0;
+        sequenceFlows.forEach(flow => {
+            const id = flow.$.id || flow.id;
+            if (id && id.startsWith('SequenceFlow_')) {
+                const numberPart = id.replace('SequenceFlow_', '');
+                const num = parseInt(numberPart, 10);
+                if (!isNaN(num) && num > maxNumber) {
+                    maxNumber = num;
+                }
+            }
+        });
+
+        return 'SequenceFlow_' + (maxNumber + 1);
     }
 
     /**
@@ -403,18 +479,10 @@ class BpmnModel {
      */
     getOverlay() {
         var result = []
-        this.construcs.forEach(element => {
-            if (element.constructor.name == 'BpmnTask' || element.constructor.name == 'BpmnEvent' || element.constructor.name == 'BpmnConnection') {
+        this.constructs.forEach(element => {
+            if (element.constructor.name == 'BpmnTask' || element.constructor.name == 'BpmnEvent' || element.constructor.name == 'BpmnConnection' || element.constructor.name == 'BpmnGateway') {
                 var color = element.getBlockColor()
                 var flags = element.deviations || []
-                result.push(new BpmnBlockOverlayReport(this.perspective_name, element.id, color, flags))
-            }
-        });
-
-        this.overlay_constructs.forEach(element => {
-            if (element.constructor.name == 'BpmnTask' || element.constructor.name == 'BpmnEvent' || element.constructor.name == 'BpmnConnection') {
-                var color = element.getBlockColor()
-                var flags = []
                 result.push(new BpmnBlockOverlayReport(this.perspective_name, element.id, color, flags))
             }
         });
