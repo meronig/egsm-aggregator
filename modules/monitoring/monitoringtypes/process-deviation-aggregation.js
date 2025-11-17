@@ -3,7 +3,7 @@ const { AggregatedBpmnModel } = require('./bpmn/aggregated-bpmn-model');
 const { SkipDeviation, OverlapDeviation, IncorrectExecutionSequenceDeviation,
     IncompleteDeviation, MultiExecutionDeviation, IncorrectBranchDeviation } = require('./bpmn/process-perspective');
 const DDB = require('../../egsm-common/database/databaseconnector');
-const performanceTracker = require('../../egsm-common/monitoring/performanceTracker');
+//const performanceTracker = require('../../egsm-common/monitoring/performanceTracker');
 
 /**
  * ProcessDeviationAggregation job combines data from multiple instances 
