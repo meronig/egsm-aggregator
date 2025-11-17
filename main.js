@@ -10,7 +10,7 @@ const { MonitoringManager } = require('./modules/monitoring/monitoringmanager');
 const { NotificationManager } = require('./modules/communication/notificationmanager');
 const { ProcessNotification } = require('./modules/egsm-common/auxiliary/primitives');
 
-const CONFIG_FILE = './config.xml'
+const CONFIG_FILE = './config/config.xml'
 module.id = "MAIN"
 
 async function startAggregator() {

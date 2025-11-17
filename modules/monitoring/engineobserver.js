@@ -3,12 +3,16 @@
  * The communication is happening through MQTT, the module performs the necessary subscriptions
  */
 var UUID = require('uuid');
+var fs = require('fs');
 
 var LOG = require('../egsm-common/auxiliary/logManager')
 var MQTT = require('../egsm-common/communication/mqttconnector')
 var DB = require('../egsm-common/database/databaseconnector')
 var GROUPMAN = require('../monitoring/groupmanager');
 const { Broker } = require('../egsm-common/auxiliary/primitives');
+var CONNCONFIG = require('../egsm-common/config/connectionconfig');
+const CONFIG_FILE = './config/config.xml'
+
 
 const TOPIC_PROCESS_LIFECYCLE = 'process_lifecycle'
 
@@ -103,7 +107,13 @@ async function addProcess(instance_id, onchange) {
         //TODO: Read broker from database instead
         //var hostname = retrieved.host
         //var port = retrieved.port
-        var broker = new Broker('localhost', 1883, '', '')
+
+        //new
+        var filecontent = fs.readFileSync(CONFIG_FILE, 'utf8')
+        CONNCONFIG.applyConfig(filecontent)
+        var broker = CONNCONFIG.getConfig().primary_broker    
+
+        //var broker = new Broker('localhost', 1883, '', '')
         var hostname = broker.host
         var port = broker.port
 

@@ -10,8 +10,8 @@ const { MonitoringManager } = require("../monitoring/monitoringmanager");
 
 module.id = 'SOCKET'
 
-const MIN_PORT = 8000
-const MAX_PORT = 60000
+const MIN_PORT = 9201
+const MAX_PORT = 9400
 CONNCONFIG.setSocketaddress('localhost', Math.floor(Math.random() * (MAX_PORT - MIN_PORT + 1) + MIN_PORT))
 
 var sessions = new Map() //session_id -> session related data
